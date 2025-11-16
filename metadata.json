@@ -1,0 +1,5 @@
+{
+  "name": "Grokipedia Viewer",
+  "description": "An application that fetches and parses a Grokipedia page to display its main content in a clean, readable format.",
+  "requestFramePermissions": []
+}
