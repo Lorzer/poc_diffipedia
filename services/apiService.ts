@@ -1,43 +1,22 @@
-import { GoogleGenAI } from "@google/genai";
-
-const CORS_PROXY_URL = 'https://api.allorigins.win/raw?url=';
+// API base URL - will be empty string in production (same origin)
+const API_BASE_URL = import.meta.env.DEV ? 'http://localhost:3000' : '';
 
 /**
- * Fetches the raw HTML source of a Grokipedia page.
+ * Fetches the raw HTML source of a Grokipedia page via our backend.
  * @param term The search term (e.g., "Donald Trump")
  * @returns A promise that resolves to the HTML source code as a string.
  */
 export const fetchGrokipediaSource = async (term: string): Promise<string> => {
-    // Grokipedia URLs replace spaces with underscores.
-    // We also use encodeURIComponent to handle other special characters safely.
-    // e.g., "Donald Trump" becomes "Donald_Trump"
     const formattedTerm = encodeURIComponent(term.trim()).replace(/%20/g, '_');
-    const targetUrl = `https://grokipedia.com/page/${formattedTerm}`;
-    
-    // --- CORS EXPLANATION ---
-    // Web browsers enforce a security feature called the "Same-Origin Policy" or CORS (Cross-Origin Resource Sharing).
-    // This policy prevents a script on one website (our app) from making requests to another website (grokipedia.com)
-    // unless the other website explicitly allows it. Grokipedia does not allow this.
-    // To work around this for this demonstration app, we use a public "CORS proxy".
-    // The request goes to the proxy, the proxy fetches the page from Grokipedia, and then the proxy sends it back to us
-    // with the correct headers that the browser will accept.
-    //
-    // WARNING: Public proxies like allorigins.win can be unreliable, slow, or have rate limits.
-    // In a real-world production application, you should build your own backend server
-    // to handle these requests reliably and securely.
-    const proxyUrl = `${CORS_PROXY_URL}${encodeURIComponent(targetUrl)}`;
-
-    const response = await fetch(proxyUrl);
+    const response = await fetch(`${API_BASE_URL}/api/grokipedia/${formattedTerm}`);
 
     if (!response.ok) {
-        throw new Error(`Failed to fetch from Grokipedia via proxy. The page may not exist or the proxy service may be down. (Status: ${response.status})`);
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(errorData.error || `Failed to fetch from Grokipedia (Status: ${response.status})`);
     }
 
-    const html = await response.text();
-    if (!html || html.includes("This page does not exist yet")) {
-        throw new Error(`The Grokipedia page for "${term}" does not exist.`);
-    }
-    return html;
+    const data = await response.json();
+    return data.html;
 };
 
 /**
@@ -52,7 +31,7 @@ export const parseAndCleanHtml = (htmlContent: string): string => {
     // The main content of a Grokipedia page is semantically contained within the <article> tag.
     // This is a much more robust selector than relying on specific div structures.
     const contentNode = doc.querySelector('article');
-    
+
     if (!contentNode) {
         throw new Error("Could not find the main <article> element in the Grokipedia source. The page structure may have changed.");
     }
@@ -79,39 +58,25 @@ export const parseAndCleanHtml = (htmlContent: string): string => {
 
 
 /**
- * Fetches the plain text extract for a given term from Wikipedia.
+ * Fetches the plain text extract for a given term from Wikipedia via our backend.
  * @param term The search term (e.g., "Albert Einstein")
  * @returns A promise that resolves to the plain text extract.
  */
 export const fetchWikipediaExtract = async (term: string): Promise<string> => {
-    const formattedTerm = encodeURIComponent(term.trim());
-    // `origin=*` is a required parameter to enable CORS for the Wikipedia API.
-    const url = `https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext&titles=${formattedTerm}&format=json&origin=*`;
+    const formattedTerm = encodeURIComponent(term.trim()).replace(/%20/g, '_');
+    const response = await fetch(`${API_BASE_URL}/api/wikipedia/${formattedTerm}`);
 
-    const response = await fetch(url);
     if (!response.ok) {
-        throw new Error(`Failed to fetch from Wikipedia API. (Status: ${response.status})`);
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(errorData.error || `Failed to fetch from Wikipedia (Status: ${response.status})`);
     }
 
     const data = await response.json();
-    const pages = data.query.pages;
-    const pageId = Object.keys(pages)[0]; // Get the first (and only) page ID
-
-    // -1 indicates a missing page
-    if (!pageId || pageId === '-1') {
-        throw new Error(`The Wikipedia page for "${term}" does not exist.`);
-    }
-
-    const extract = pages[pageId].extract;
-    if (!extract) {
-         throw new Error(`No summary extract found on Wikipedia for "${term}". It might be a redirect or disambiguation page.`);
-    }
-
-    return extract;
+    return data.extract;
 };
 
 /**
- * Sends content from two sources to the Gemini API for a comparison.
+ * Sends content from two sources to the Gemini API for a comparison via our backend.
  * @param systemPrompt The system instruction for the AI.
  * @param userPrompt The user's specific request.
  * @param grokipediaText The text content from Grokipedia.
@@ -124,36 +89,24 @@ export const compareContentWithGemini = async (
     grokipediaText: string,
     wikipediaText: string
 ): Promise<string> => {
-    if (!process.env.API_KEY) {
-        throw new Error("API_KEY environment variable not set.");
+    const response = await fetch(`${API_BASE_URL}/api/compare`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            systemPrompt,
+            userPrompt,
+            grokipediaText,
+            wikipediaText,
+        }),
+    });
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(errorData.error || `Gemini API request failed (Status: ${response.status})`);
     }
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    
-    const fullPrompt = `
-        ${userPrompt}
 
-        --- GROKIPEDIA TEXT ---
-        ${grokipediaText}
-
-        --- WIKIPEDIA TEXT ---
-        ${wikipediaText}
-    `;
-
-    try {
-        const response = await ai.models.generateContent({
-            model: "gemini-2.5-pro",
-            contents: fullPrompt,
-            config: {
-                systemInstruction: systemPrompt,
-                // Enable thinking for more complex reasoning. 
-                // The max budget for 2.5 Pro is 32768.
-                thinkingConfig: { thinkingBudget: 32768 } 
-            },
-        });
-        
-        return response.text;
-    } catch (error: any) {
-        console.error("Gemini API Error:", error);
-        throw new Error(`Gemini API request failed: ${error.message}`);
-    }
+    const data = await response.json();
+    return data.comparison;
 };
