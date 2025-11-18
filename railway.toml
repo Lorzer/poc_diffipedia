@@ -2,7 +2,7 @@
 builder = "NIXPACKS"
 
 [build.nixpacksPlan.phases.setup]
-nixPkgs = ["nodejs", "python3"]
+nixPkgs = ["nodejs", "python3", "gcc", "gnumake"]
 
 [build.nixpacksPlan.phases.install]
 cmds = ["npm install"]
