@@ -4,8 +4,11 @@ builder = "NIXPACKS"
 [build.nixpacksPlan.phases.setup]
 nixPkgs = ["nodejs", "python3"]
 
+[build.nixpacksPlan.phases.install]
+cmds = ["npm install"]
+
 [build.nixpacksPlan.phases.build]
-cmds = ["npm install", "npm run build"]
+cmds = ["npm run build"]
 
 [deploy]
 startCommand = "npm run start"
