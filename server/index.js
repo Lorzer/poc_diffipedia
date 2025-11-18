@@ -2,21 +2,40 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { readFileSync } from 'fs';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import Database from 'better-sqlite3';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Load .env file if it exists
+try {
+    const envFile = readFileSync(path.join(__dirname, '../.env'), 'utf-8');
+    envFile.split('\n').forEach(line => {
+        const match = line.match(/^([^#=]+)=(.*)$/);
+        if (match && !process.env[match[1]]) {
+            process.env[match[1]] = match[2].trim();
+        }
+    });
+} catch (err) {
+    // .env file doesn't exist, that's okay
+}
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Initialize Gemini AI
-if (!process.env.GEMINI_API_KEY) {
-    console.error('ERROR: GEMINI_API_KEY environment variable is not set!');
-    process.exit(1);
-}
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+// Initialize Gemini AI (lazy initialization)
+let genAI = null;
+const getGenAI = () => {
+    if (!genAI) {
+        if (!process.env.GEMINI_API_KEY) {
+            throw new Error('GEMINI_API_KEY environment variable is not set. Please set it in your .env file or environment.');
+        }
+        genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    }
+    return genAI;
+};
 
 // Initialize SQLite Database
 const db = new Database(process.env.DATABASE_PATH || './comparisons.db');
@@ -148,7 +167,8 @@ app.post('/api/compare', async (req, res) => {
             ${wikipediaText}
         `;
 
-        const model = genAI.getGenerativeModel({
+        const ai = getGenAI();
+        const model = ai.getGenerativeModel({
             model: 'gemini-2.0-flash-exp',
             systemInstruction: systemPrompt,
         });
