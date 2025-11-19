@@ -1,6 +1,7 @@
 import express from 'express';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { readFileSync } from 'fs';
 import { createServer as createViteServer } from 'vite';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -57,7 +58,23 @@ async function createServer() {
       server: { middlewareMode: true },
       appType: 'custom'
     });
+    
+    // Use vite's connect instance as middleware
     app.use(vite.middlewares);
+    
+    // Transform and serve index.html in dev mode
+    app.use('*', async (req, res, next) => {
+      try {
+        const url = req.originalUrl;
+        // Read the HTML file and transform it with Vite
+        const template = readFileSync(join(__dirname, 'index.html'), 'utf-8');
+        const html = await vite.transformIndexHtml(url, template);
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
+      } catch (e) {
+        vite.ssrFixStacktrace(e);
+        next(e);
+      }
+    });
   }
 
   app.listen(port, '0.0.0.0', () => {
