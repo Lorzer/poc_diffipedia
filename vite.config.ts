@@ -8,6 +8,8 @@ export default defineConfig(({ mode }) => {
       server: {
         port: 3000,
         host: '0.0.0.0',
+        // Note: In dev mode, Vite runs as middleware in Express (server.js)
+        // API routes are handled by Express, so no proxy needed
       },
       plugins: [react()],
       define: {

@@ -1,36 +1,29 @@
 import { GoogleGenAI } from "@google/genai";
 
-const CORS_PROXY_URL = 'https://api.allorigins.win/raw?url=';
-
 /**
  * Fetches the raw HTML source of a Grokipedia page.
  * @param term The search term (e.g., "Donald Trump")
  * @returns A promise that resolves to the HTML source code as a string.
  */
 export const fetchGrokipediaSource = async (term: string): Promise<string> => {
-    // Grokipedia URLs replace spaces with underscores.
-    // We also use encodeURIComponent to handle other special characters safely.
-    // e.g., "Donald Trump" becomes "Donald_Trump"
-    const formattedTerm = encodeURIComponent(term.trim()).replace(/%20/g, '_');
-    const targetUrl = `https://grokipedia.com/page/${formattedTerm}`;
-    
-    // --- CORS EXPLANATION ---
-    // Web browsers enforce a security feature called the "Same-Origin Policy" or CORS (Cross-Origin Resource Sharing).
-    // This policy prevents a script on one website (our app) from making requests to another website (grokipedia.com)
-    // unless the other website explicitly allows it. Grokipedia does not allow this.
-    // To work around this for this demonstration app, we use a public "CORS proxy".
-    // The request goes to the proxy, the proxy fetches the page from Grokipedia, and then the proxy sends it back to us
-    // with the correct headers that the browser will accept.
-    //
-    // WARNING: Public proxies like allorigins.win can be unreliable, slow, or have rate limits.
-    // In a real-world production application, you should build your own backend server
-    // to handle these requests reliably and securely.
-    const proxyUrl = `${CORS_PROXY_URL}${encodeURIComponent(targetUrl)}`;
+    // Use our Express backend proxy - same origin, no CORS issues!
+    const formattedTerm = encodeURIComponent(term.trim());
+    const proxyUrl = `/api/proxy/grokipedia?term=${formattedTerm}`;
 
     const response = await fetch(proxyUrl);
 
     if (!response.ok) {
-        throw new Error(`Failed to fetch from Grokipedia via proxy. The page may not exist or the proxy service may be down. (Status: ${response.status})`);
+        // Try to parse error message from JSON response
+        let errorMessage = `Failed to fetch from Grokipedia (Status: ${response.status})`;
+        try {
+            const errorData = await response.json();
+            if (errorData.error) {
+                errorMessage = errorData.error;
+            }
+        } catch {
+            // If response is not JSON, use default message
+        }
+        throw new Error(errorMessage);
     }
 
     const html = await response.text();
